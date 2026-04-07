@@ -54,14 +54,23 @@ if uploaded_file:
             st.error("Could not find the order ('Zakázka') header row in the first 15 rows.")
             st.stop()
 
-        # 3. Find steps column dynamically — look for "příč" in the header row
+        # 3. Find steps column dynamically — look for "Poč.př." / "Počet příček"
+        # in the rows around the Zakázka header. Skip totals like "Celkem příček".
         steps_col_index = None
-        for col_idx in range(len(df.columns)):
-            val = str(df.iloc[zakazka_row_index, col_idx]).lower()
-            if "příč" in val or "step" in val or "pricel" in val or "pric" in val:
-                steps_col_index = col_idx
+        search_end = min(len(df), zakazka_row_index + 4)
+        for r in range(zakazka_row_index, search_end):
+            for col_idx in range(len(df.columns)):
+                val = str(df.iloc[r, col_idx]).lower().strip()
+                if val in ("nan", ""):
+                    continue
+                if "celk" in val:  # skip total columns like "Celkem příček"
+                    continue
+                if "poč" in val or "příč" in val or val.startswith("step"):
+                    steps_col_index = col_idx
+                    break
+            if steps_col_index is not None:
                 break
-        # Fallback to column 2 if not found
+        # Fallback
         if steps_col_index is None:
             steps_col_index = 2
 
