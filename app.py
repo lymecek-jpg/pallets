@@ -283,7 +283,7 @@ if uploaded_file:
             m_packs = get_packs(p["M"])
             r_packs = get_packs(p["R"])
 
-            with st.expander(f"Pallet #{p_idx + 1}  —  Order: {p['Order']}", expanded=True):
+            with st.expander(f"Pallet #{p_idx + 1}  —  Order: {p['Order']}", expanded=False):
 
                 # --- Visual chart ---
                 st.plotly_chart(pallet_figure(p), use_container_width=True, key=f"chart_{p_idx}")
