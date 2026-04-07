@@ -144,7 +144,7 @@ if uploaded_file:
                     offset = total - len(lst)
                     if i >= offset:
                         pk = lst[i - offset]
-                        return f"{pk['Count']}x {pk['Steps']}-příčkový"
+                        return f"{pk['Count']}x {pk['Steps']}-příček"
                     return ""
 
                 visual_rows = []
@@ -174,7 +174,7 @@ if uploaded_file:
                         if packs:
                             for i, pk in enumerate(packs):
                                 note = " ← spodní vrstva" if i == 0 else ""
-                                st.write(f"{i+1}. {pk['Count']}x {pk['Steps']}-příčkový{note}")
+                                st.write(f"{i+1}. {pk['Count']}x {pk['Steps']}-příček{note}")
                         else:
                             st.write("—")
 
