@@ -160,61 +160,88 @@ if uploaded_file:
             res.append(curr)
             return res
 
-        # 8. Helper: build a plotly figure for one pallet
+        # 8. Helper: build a plotly brick-layout figure for one pallet
         def pallet_figure(p):
+            BLOCK_H = 1.0        # height of each ladder brick
+            BLOCK_W = 0.7        # width of each brick (0–1 column space)
+            GAP     = 0.05       # small gap between bricks
+
             stack_labels = ["LEFT", "MIDDLE", "RIGHT"]
             stack_data   = [p["L"], p["M"], p["R"]]
+            x_centers    = [0.5, 1.5, 2.5]
 
-            # Collect all unique step counts across this pallet for legend
-            all_steps = sorted({item["Steps"] for stack in stack_data for item in stack}, reverse=True)
+            shapes = []
+            annotations = []
+            legend_seen = set()
+            legend_traces = []
 
-            # For each step count, build one bar trace (one segment per stack)
-            traces = {}
-            for steps in all_steps:
-                traces[steps] = {"x": [], "y": [], "text": []}
+            for x_center, stack in zip(x_centers, stack_data):
+                x0 = x_center - BLOCK_W / 2
+                x1 = x_center + BLOCK_W / 2
 
-            for label, stack in zip(stack_labels, stack_data):
-                # Count ladders per step type in this stack (bottom → top order)
-                step_counts = {}
-                for item in stack:
-                    step_counts[item["Steps"]] = step_counts.get(item["Steps"], 0) + 1
-                for steps in all_steps:
-                    count = step_counts.get(steps, 0)
-                    traces[steps]["x"].append(label)
-                    traces[steps]["y"].append(count)
-                    traces[steps]["text"].append(f"{count}x {steps}-step" if count else "")
+                for row_idx, item in enumerate(stack):   # bottom → top
+                    y0 = row_idx * (BLOCK_H + GAP)
+                    y1 = y0 + BLOCK_H
+                    color = step_color(item["Steps"])
 
-            fig = go.Figure()
-            for steps in all_steps:
-                t = traces[steps]
-                fig.add_trace(go.Bar(
-                    name=f"{steps}-step",
-                    x=t["x"],
-                    y=t["y"],
-                    text=t["text"],
-                    textposition="inside",
-                    insidetextanchor="middle",
-                    marker_color=step_color(steps),
-                    marker_line_color="white",
-                    marker_line_width=1.5,
-                    hovertemplate="%{text}<extra></extra>",
-                ))
+                    shapes.append(dict(
+                        type="rect",
+                        x0=x0, x1=x1, y0=y0, y1=y1,
+                        fillcolor=color,
+                        line=dict(color="white", width=1.5),
+                        layer="below",
+                    ))
+                    annotations.append(dict(
+                        x=x_center, y=(y0 + y1) / 2,
+                        text=str(item["Steps"]),
+                        showarrow=False,
+                        font=dict(color="white", size=11, family="Arial Black"),
+                        xanchor="center", yanchor="middle",
+                    ))
 
+                    # One invisible scatter point per step type for the legend
+                    if item["Steps"] not in legend_seen:
+                        legend_seen.add(item["Steps"])
+                        legend_traces.append(go.Scatter(
+                            x=[None], y=[None],
+                            mode="markers",
+                            marker=dict(size=14, color=color, symbol="square"),
+                            name=f"{item['Steps']}-step",
+                            showlegend=True,
+                        ))
+
+            total_ladders = max(len(s) for s in stack_data) if any(stack_data) else 1
+            fig_height = max(300, int(total_ladders * (BLOCK_H + GAP) * 22 + 80))
+
+            fig = go.Figure(data=sorted(legend_traces, key=lambda t: int(t.name.split("-")[0])))
             fig.update_layout(
-                barmode="stack",
-                height=380,
-                margin=dict(l=20, r=20, t=30, b=20),
-                legend=dict(title="Step count", orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                yaxis=dict(title="Ladders", dtick=5),
-                xaxis=dict(title="Stack position"),
+                shapes=shapes,
+                annotations=annotations,
+                height=fig_height,
+                margin=dict(l=10, r=10, t=40, b=40),
+                xaxis=dict(
+                    tickvals=x_centers,
+                    ticktext=stack_labels,
+                    range=[0, 3],
+                    showgrid=False, zeroline=False,
+                ),
+                yaxis=dict(
+                    title="Position (bottom → top)",
+                    showgrid=True, gridcolor="#e0e0e0", zeroline=False,
+                    range=[-0.3, max_per_stack * (BLOCK_H + GAP) + 0.5],
+                ),
+                legend=dict(
+                    title="Step count", orientation="h",
+                    yanchor="bottom", y=1.02, xanchor="right", x=1,
+                ),
                 plot_bgcolor="#fafafa",
                 paper_bgcolor="#fafafa",
             )
-            # Draw max capacity line
+            # Max capacity line
+            y_max_line = max_per_stack * (BLOCK_H + GAP) - GAP
             fig.add_hline(
-                y=max_per_stack,
-                line_dash="dash",
-                line_color="red",
+                y=y_max_line,
+                line_dash="dash", line_color="red",
                 annotation_text=f"Max ({max_per_stack})",
                 annotation_position="top right",
             )
