@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(page_title="Pallet Loading Optimizer", layout="wide")
-st.title("Pallet Loading Optimizer")
+st.set_page_config(page_title="Optimalizace nakládky palet", layout="wide")
+st.title("Optimalizace nakládky palet")
 
 # --- Constants ---
 MAX_HEIGHT_MM = 1200
@@ -11,7 +11,7 @@ NESTED_ADDITION_MM = 25
 max_per_stack = int((MAX_HEIGHT_MM - FIRST_LADDER_MM) / NESTED_ADDITION_MM) + 1
 
 # --- File Upload ---
-uploaded_file = st.file_uploader("Upload Order Excel / CSV file", type=["xlsx", "xls", "csv"])
+uploaded_file = st.file_uploader("Nahrajte soubor objednávek (Excel / CSV)", type=["xlsx", "xls", "csv"])
 
 if uploaded_file:
     try:
@@ -34,7 +34,7 @@ if uploaded_file:
                 break
 
         if zakazka_row_index == -1:
-            st.error("Could not find the order ('Zakázka') header row in the first 15 rows.")
+            st.error("Řádek s hlavičkou 'Zakázka' nebyl nalezen v prvních 15 řádcích.")
             st.stop()
 
         # 3. Extract order columns
@@ -45,7 +45,7 @@ if uploaded_file:
                 order_columns[col_idx] = val
 
         if not order_columns:
-            st.error("No order columns found in the header row.")
+            st.error("V řádku hlavičky nebyly nalezeny žádné sloupce zakázek.")
             st.stop()
 
         # 4. Parse rows
@@ -126,14 +126,14 @@ if uploaded_file:
             return res
 
         # 7. Display results
-        st.success(f"Packing complete — {len(pallets)} pallets generated.")
+        st.success(f"Balení dokončeno — vygenerováno {len(pallets)} palet.")
 
         for p_idx, p in enumerate(pallets):
             l_packs = get_packs(p["L"])
             m_packs = get_packs(p["M"])
             r_packs = get_packs(p["R"])
 
-            with st.expander(f"Pallet #{p_idx + 1}  —  Order: {p['Order']}", expanded=True):
+            with st.expander(f"Paleta #{p_idx + 1}  —  Zakázka: {p['Order']}", expanded=True):
                 # Visual map as a table
                 max_d = max(len(l_packs), len(m_packs), len(r_packs), 1)
                 rev_l = list(reversed(l_packs))
@@ -144,7 +144,7 @@ if uploaded_file:
                     offset = total - len(lst)
                     if i >= offset:
                         pk = lst[i - offset]
-                        return f"{pk['Count']}x {pk['Steps']}-step"
+                        return f"{pk['Count']}x {pk['Steps']}-příčkový"
                     return ""
 
                 visual_rows = []
@@ -155,37 +155,38 @@ if uploaded_file:
                         "RIGHT": fmt(rev_r, i, max_d),
                     })
 
-                st.markdown("**Visual Map** (top → bottom)")
-                st.table(pd.DataFrame(visual_rows))
+                st.markdown("**Vizuální mapa** (shora dolů)")
+                visual_df = pd.DataFrame(visual_rows).rename(columns={"LEFT": "VLEVO", "MIDDLE": "UPROSTŘED", "RIGHT": "VPRAVO"})
+                st.table(visual_df)
 
                 # Detailed loading list
-                st.markdown("**Loading Instructions** (load bottom to top)")
+                st.markdown("**Pokyny k nakládce** (nakládejte zdola nahoru)")
                 cols = st.columns(3)
                 for col, label, packs, stack_key in zip(
                     cols,
-                    ["LEFT", "MIDDLE", "RIGHT"],
+                    ["VLEVO", "UPROSTŘED", "VPRAVO"],
                     [l_packs, m_packs, r_packs],
                     ["L", "M", "R"],
                 ):
                     with col:
                         total = len(p[stack_key])
-                        st.markdown(f"**{label}** ({total} ladders)")
+                        st.markdown(f"**{label}** ({total} žebříků)")
                         if packs:
                             for i, pk in enumerate(packs):
-                                note = " ← bottom" if i == 0 else ""
-                                st.write(f"{i+1}. {pk['Count']}x {pk['Steps']}-step{note}")
+                                note = " ← spodní vrstva" if i == 0 else ""
+                                st.write(f"{i+1}. {pk['Count']}x {pk['Steps']}-příčkový{note}")
                         else:
                             st.write("—")
 
         # Loose ladders
         if loose_ladders:
             st.markdown("---")
-            st.markdown("### Loose Ladders (2-step) — place anywhere")
+            st.markdown("### Volné žebříky (2-příčkové) — umístěte kdekoliv")
             loose_dict = {}
             for item in loose_ladders:
                 loose_dict[item["Order"]] = loose_dict.get(item["Order"], 0) + item["Quantity"]
             for order_name, qty in loose_dict.items():
-                st.write(f"- **{qty}x** 2-step ladders  (Order: {order_name})")
+                st.write(f"- **{qty}x** 2-příčkové žebříky  (Zakázka: {order_name})")
 
     except Exception as e:
-        st.error(f"Error processing file: {e}")
+        st.error(f"Chyba při zpracování souboru: {e}")
