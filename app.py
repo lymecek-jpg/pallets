@@ -223,7 +223,26 @@ if uploaded_file:
         # 9. Display results
         st.success(f"Packing complete — {len(pallets)} pallets generated.")
 
-        for p_idx, p in enumerate(pallets):
+        # --- Filter bar ---
+        all_orders = sorted({p["Order"] for p in pallets})
+        col_search, col_select = st.columns([2, 3])
+        with col_search:
+            search_text = st.text_input("Search order", placeholder="Type order name…")
+        with col_select:
+            selected_orders = st.multiselect("Filter by order", options=all_orders, default=[])
+
+        def pallet_visible(p):
+            if search_text and search_text.lower() not in p["Order"].lower():
+                return False
+            if selected_orders and p["Order"] not in selected_orders:
+                return False
+            return True
+
+        visible_pallets = [(i, p) for i, p in enumerate(pallets) if pallet_visible(p)]
+        if not visible_pallets:
+            st.warning("No pallets match the current filter.")
+
+        for p_idx, p in visible_pallets:
             l_packs = get_packs(p["L"])
             m_packs = get_packs(p["M"])
             r_packs = get_packs(p["R"])
