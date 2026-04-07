@@ -126,10 +126,24 @@ if uploaded_file:
                 except (ValueError, TypeError):
                     pass
 
-        # 6. Pallet packing
+        # 6. Pallet packing — iterate orders in file column order (left → right)
         pallets = []
 
-        for order_name, pack_list in orders_dict.items():
+        ordered_order_names = []
+        seen = set()
+        for col_idx in sorted(order_columns.keys()):
+            name = order_columns[col_idx]
+            if name in orders_dict and name not in seen:
+                ordered_order_names.append(name)
+                seen.add(name)
+        # Append any orders that only appeared as loose ladders or were missed
+        for name in orders_dict.keys():
+            if name not in seen:
+                ordered_order_names.append(name)
+                seen.add(name)
+
+        for order_name in ordered_order_names:
+            pack_list = orders_dict[order_name]
             pack_list.sort(key=lambda x: (x["Steps"], x["Size"]), reverse=True)
             current_left, current_mid, current_right = [], [], []
 
