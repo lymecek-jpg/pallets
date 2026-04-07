@@ -184,13 +184,14 @@ if uploaded_file:
             return res
 
         # 8. Helper: build a plotly brick-layout figure for one pallet
-        def pallet_figure(p):
-            BLOCK_H = 1.0        # height of each ladder brick
-            BLOCK_W = 0.7        # width of each brick (0–1 column space)
-            GAP     = 0.05       # small gap between bricks
+        # One brick per PACK (e.g. "3x 20-step"), 3 columns LEFT/MIDDLE/RIGHT
+        def pallet_figure(p, pack_getter):
+            BLOCK_H = 1.0
+            BLOCK_W = 0.85
+            GAP     = 0.08
 
             stack_labels = ["LEFT", "MIDDLE", "RIGHT"]
-            stack_data   = [p["L"], p["M"], p["R"]]
+            stack_packs  = [pack_getter(p["L"]), pack_getter(p["M"]), pack_getter(p["R"])]
             x_centers    = [0.5, 1.5, 2.5]
 
             shapes = []
@@ -198,75 +199,68 @@ if uploaded_file:
             legend_seen = set()
             legend_traces = []
 
-            for x_center, stack in zip(x_centers, stack_data):
+            max_packs_in_stack = max((len(s) for s in stack_packs), default=1)
+
+            for x_center, packs in zip(x_centers, stack_packs):
                 x0 = x_center - BLOCK_W / 2
                 x1 = x_center + BLOCK_W / 2
 
-                for row_idx, item in enumerate(stack):   # bottom → top
+                for row_idx, pack in enumerate(packs):  # bottom → top
                     y0 = row_idx * (BLOCK_H + GAP)
                     y1 = y0 + BLOCK_H
-                    color = step_color(item["Steps"])
+                    color = step_color(pack["Steps"])
 
                     shapes.append(dict(
                         type="rect",
                         x0=x0, x1=x1, y0=y0, y1=y1,
                         fillcolor=color,
-                        line=dict(color="white", width=1.5),
+                        line=dict(color="white", width=2),
                         layer="below",
                     ))
                     annotations.append(dict(
                         x=x_center, y=(y0 + y1) / 2,
-                        text=str(item["Steps"]),
+                        text=f"<b>{pack['Count']}x {pack['Steps']}-step</b>",
                         showarrow=False,
-                        font=dict(color="white", size=11, family="Arial Black"),
+                        font=dict(color="white", size=18, family="Arial"),
                         xanchor="center", yanchor="middle",
                     ))
 
-                    # One invisible scatter point per step type for the legend
-                    if item["Steps"] not in legend_seen:
-                        legend_seen.add(item["Steps"])
+                    if pack["Steps"] not in legend_seen:
+                        legend_seen.add(pack["Steps"])
                         legend_traces.append(go.Scatter(
                             x=[None], y=[None],
                             mode="markers",
-                            marker=dict(size=14, color=color, symbol="square"),
-                            name=f"{item['Steps']}-step",
+                            marker=dict(size=16, color=color, symbol="square"),
+                            name=f"{pack['Steps']}-step",
                             showlegend=True,
                         ))
 
-            total_ladders = max(len(s) for s in stack_data) if any(stack_data) else 1
-            fig_height = max(300, int(total_ladders * (BLOCK_H + GAP) * 22 + 80))
+            fig_height = max(320, int(max_packs_in_stack * (BLOCK_H + GAP) * 60 + 100))
 
             fig = go.Figure(data=sorted(legend_traces, key=lambda t: int(t.name.split("-")[0])))
             fig.update_layout(
                 shapes=shapes,
                 annotations=annotations,
                 height=fig_height,
-                margin=dict(l=10, r=10, t=40, b=40),
+                margin=dict(l=10, r=10, t=50, b=40),
                 xaxis=dict(
                     tickvals=x_centers,
-                    ticktext=stack_labels,
+                    ticktext=[f"<b>{l}</b>" for l in stack_labels],
+                    tickfont=dict(size=14),
                     range=[0, 3],
                     showgrid=False, zeroline=False,
                 ),
                 yaxis=dict(
-                    title="Position (bottom → top)",
-                    showgrid=True, gridcolor="#e0e0e0", zeroline=False,
-                    range=[-0.3, max_per_stack * (BLOCK_H + GAP) + 0.5],
+                    showgrid=False, zeroline=False,
+                    showticklabels=False,
+                    range=[-0.3, max(max_packs_in_stack, 1) * (BLOCK_H + GAP) + 0.3],
                 ),
                 legend=dict(
-                    title="Step count", orientation="h",
+                    title="Step type", orientation="h",
                     yanchor="bottom", y=1.02, xanchor="right", x=1,
                 ),
                 plot_bgcolor="#fafafa",
                 paper_bgcolor="#fafafa",
-            )
-            # Max capacity line
-            y_max_line = max_per_stack * (BLOCK_H + GAP) - GAP
-            fig.add_hline(
-                y=y_max_line,
-                line_dash="dash", line_color="red",
-                annotation_text=f"Max ({max_per_stack})",
-                annotation_position="top right",
             )
             return fig
 
@@ -300,7 +294,7 @@ if uploaded_file:
             with st.expander(f"Pallet #{p_idx + 1}  —  Order: {p['Order']}", expanded=False):
 
                 # --- Visual chart ---
-                st.plotly_chart(pallet_figure(p), use_container_width=True, key=f"chart_{p_idx}")
+                st.plotly_chart(pallet_figure(p, get_packs), use_container_width=True, key=f"chart_{p_idx}")
 
                 # --- Text table map ---
                 max_d = max(len(l_packs), len(m_packs), len(r_packs), 1)
