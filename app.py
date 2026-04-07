@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
+import plotly.graph_objects as go
 
-st.set_page_config(page_title="Optimalizace nakládky palet", layout="wide")
-st.title("Optimalizace nakládky palet")
+st.set_page_config(page_title="Pallet Loading Optimizer", layout="wide")
+st.title("Pallet Loading Optimizer")
 
 # --- Constants ---
 MAX_HEIGHT_MM = 1200
@@ -10,8 +11,24 @@ FIRST_LADDER_MM = 50
 NESTED_ADDITION_MM = 25
 max_per_stack = int((MAX_HEIGHT_MM - FIRST_LADDER_MM) / NESTED_ADDITION_MM) + 1
 
+# Step count → color
+STEP_COLORS = {
+    2:  "#a8d8ea",
+    3:  "#57a0d3",
+    4:  "#2166ac",
+    5:  "#1a6b4a",
+    6:  "#4dac26",
+    7:  "#f4a736",
+    8:  "#d73027",
+    9:  "#7b2d8b",
+    10: "#404040",
+}
+
+def step_color(steps):
+    return STEP_COLORS.get(steps, "#888888")
+
 # --- File Upload ---
-uploaded_file = st.file_uploader("Nahrajte soubor objednávek (Excel / CSV)", type=["xlsx", "xls", "csv"])
+uploaded_file = st.file_uploader("Upload Order Excel / CSV file", type=["xlsx", "xls", "csv"])
 
 if uploaded_file:
     try:
@@ -34,26 +51,44 @@ if uploaded_file:
                 break
 
         if zakazka_row_index == -1:
-            st.error("Řádek s hlavičkou 'Zakázka' nebyl nalezen v prvních 15 řádcích.")
+            st.error("Could not find the order ('Zakázka') header row in the first 15 rows.")
             st.stop()
 
-        # 3. Extract order columns
+        # 3. Find steps column dynamically — look for "příč" in the header row
+        steps_col_index = None
+        for col_idx in range(len(df.columns)):
+            val = str(df.iloc[zakazka_row_index, col_idx]).lower()
+            if "příč" in val or "step" in val or "pricel" in val or "pric" in val:
+                steps_col_index = col_idx
+                break
+        # Fallback to column 2 if not found
+        if steps_col_index is None:
+            steps_col_index = 2
+
+        # 4. Extract order columns (skip header/total columns and the steps column)
         order_columns = {}
         for col_idx in range(len(df.columns)):
+            if col_idx == steps_col_index:
+                continue
             val = str(df.iloc[zakazka_row_index, col_idx]).strip()
-            if val.lower() not in ["nan", "", "zakázka", "celkem", "celkem příček"] and "zak" not in val.lower():
+            if (
+                val.lower() not in ["nan", "", "zakázka", "celkem", "celkem příček"]
+                and "zak" not in val.lower()
+                and "příč" not in val.lower()
+                and "celk" not in val.lower()
+            ):
                 order_columns[col_idx] = val
 
         if not order_columns:
-            st.error("V řádku hlavičky nebyly nalezeny žádné sloupce zakázek.")
+            st.error("No order columns found in the header row.")
             st.stop()
 
-        # 4. Parse rows
+        # 5. Parse rows
         orders_dict = {}
         loose_ladders = []
 
         for row_idx in range(zakazka_row_index + 1, len(df)):
-            steps_val = df.iloc[row_idx, 2]
+            steps_val = df.iloc[row_idx, steps_col_index]
             try:
                 steps = float(steps_val)
                 if pd.isna(steps):
@@ -82,7 +117,7 @@ if uploaded_file:
                 except (ValueError, TypeError):
                     pass
 
-        # 5. Pallet packing
+        # 6. Pallet packing
         pallets = []
 
         for order_name, pack_list in orders_dict.items():
@@ -110,7 +145,7 @@ if uploaded_file:
             if current_left or current_mid or current_right:
                 pallets.append({"L": current_left, "M": current_mid, "R": current_right, "Order": order_name})
 
-        # 6. Helper to group a stack into packs
+        # 7. Helper: group a raw stack list into packs
         def get_packs(stack):
             if not stack:
                 return []
@@ -125,16 +160,80 @@ if uploaded_file:
             res.append(curr)
             return res
 
-        # 7. Display results
-        st.success(f"Balení dokončeno — vygenerováno {len(pallets)} palet.")
+        # 8. Helper: build a plotly figure for one pallet
+        def pallet_figure(p):
+            stack_labels = ["LEFT", "MIDDLE", "RIGHT"]
+            stack_data   = [p["L"], p["M"], p["R"]]
+
+            # Collect all unique step counts across this pallet for legend
+            all_steps = sorted({item["Steps"] for stack in stack_data for item in stack}, reverse=True)
+
+            # For each step count, build one bar trace (one segment per stack)
+            traces = {}
+            for steps in all_steps:
+                traces[steps] = {"x": [], "y": [], "text": []}
+
+            for label, stack in zip(stack_labels, stack_data):
+                # Count ladders per step type in this stack (bottom → top order)
+                step_counts = {}
+                for item in stack:
+                    step_counts[item["Steps"]] = step_counts.get(item["Steps"], 0) + 1
+                for steps in all_steps:
+                    count = step_counts.get(steps, 0)
+                    traces[steps]["x"].append(label)
+                    traces[steps]["y"].append(count)
+                    traces[steps]["text"].append(f"{count}x {steps}-step" if count else "")
+
+            fig = go.Figure()
+            for steps in all_steps:
+                t = traces[steps]
+                fig.add_trace(go.Bar(
+                    name=f"{steps}-step",
+                    x=t["x"],
+                    y=t["y"],
+                    text=t["text"],
+                    textposition="inside",
+                    insidetextanchor="middle",
+                    marker_color=step_color(steps),
+                    marker_line_color="white",
+                    marker_line_width=1.5,
+                    hovertemplate="%{text}<extra></extra>",
+                ))
+
+            fig.update_layout(
+                barmode="stack",
+                height=380,
+                margin=dict(l=20, r=20, t=30, b=20),
+                legend=dict(title="Step count", orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                yaxis=dict(title="Ladders", dtick=5),
+                xaxis=dict(title="Stack position"),
+                plot_bgcolor="#fafafa",
+                paper_bgcolor="#fafafa",
+            )
+            # Draw max capacity line
+            fig.add_hline(
+                y=max_per_stack,
+                line_dash="dash",
+                line_color="red",
+                annotation_text=f"Max ({max_per_stack})",
+                annotation_position="top right",
+            )
+            return fig
+
+        # 9. Display results
+        st.success(f"Packing complete — {len(pallets)} pallets generated.")
 
         for p_idx, p in enumerate(pallets):
             l_packs = get_packs(p["L"])
             m_packs = get_packs(p["M"])
             r_packs = get_packs(p["R"])
 
-            with st.expander(f"Paleta #{p_idx + 1}  —  Zakázka: {p['Order']}", expanded=True):
-                # Visual map as a table
+            with st.expander(f"Pallet #{p_idx + 1}  —  Order: {p['Order']}", expanded=True):
+
+                # --- Visual chart ---
+                st.plotly_chart(pallet_figure(p), use_container_width=True, key=f"chart_{p_idx}")
+
+                # --- Text table map ---
                 max_d = max(len(l_packs), len(m_packs), len(r_packs), 1)
                 rev_l = list(reversed(l_packs))
                 rev_m = list(reversed(m_packs))
@@ -144,49 +243,48 @@ if uploaded_file:
                     offset = total - len(lst)
                     if i >= offset:
                         pk = lst[i - offset]
-                        return f"{pk['Count']}x {pk['Steps']}-příček"
+                        return f"{pk['Count']}x {pk['Steps']}-step"
                     return ""
 
-                visual_rows = []
-                for i in range(max_d):
-                    visual_rows.append({
-                        "LEFT": fmt(rev_l, i, max_d),
+                visual_rows = [
+                    {
+                        "LEFT":   fmt(rev_l, i, max_d),
                         "MIDDLE": fmt(rev_m, i, max_d),
-                        "RIGHT": fmt(rev_r, i, max_d),
-                    })
+                        "RIGHT":  fmt(rev_r, i, max_d),
+                    }
+                    for i in range(max_d)
+                ]
+                with st.expander("Text map (top → bottom)", expanded=False):
+                    st.table(pd.DataFrame(visual_rows))
 
-                st.markdown("**Vizuální mapa** (shora dolů)")
-                visual_df = pd.DataFrame(visual_rows).rename(columns={"LEFT": "VLEVO", "MIDDLE": "UPROSTŘED", "RIGHT": "VPRAVO"})
-                st.table(visual_df)
-
-                # Detailed loading list
-                st.markdown("**Pokyny k nakládce** (nakládejte zdola nahoru)")
+                # --- Loading instructions ---
+                st.markdown("**Loading Instructions** (load bottom to top)")
                 cols = st.columns(3)
                 for col, label, packs, stack_key in zip(
                     cols,
-                    ["VLEVO", "UPROSTŘED", "VPRAVO"],
+                    ["LEFT", "MIDDLE", "RIGHT"],
                     [l_packs, m_packs, r_packs],
                     ["L", "M", "R"],
                 ):
                     with col:
                         total = len(p[stack_key])
-                        st.markdown(f"**{label}** ({total} žebříků)")
+                        st.markdown(f"**{label}** ({total} ladders)")
                         if packs:
                             for i, pk in enumerate(packs):
-                                note = " ← spodní vrstva" if i == 0 else ""
-                                st.write(f"{i+1}. {pk['Count']}x {pk['Steps']}-příček{note}")
+                                note = " ← bottom" if i == 0 else ""
+                                st.write(f"{i+1}. {pk['Count']}x {pk['Steps']}-step{note}")
                         else:
                             st.write("—")
 
-        # Loose ladders
+        # 10. Loose ladders
         if loose_ladders:
             st.markdown("---")
-            st.markdown("### Volné žebříky (2-příčkové) — umístěte kdekoliv")
+            st.markdown("### Loose Ladders (2-step) — place anywhere")
             loose_dict = {}
             for item in loose_ladders:
                 loose_dict[item["Order"]] = loose_dict.get(item["Order"], 0) + item["Quantity"]
             for order_name, qty in loose_dict.items():
-                st.write(f"- **{qty}x** 2-příčkové žebříky  (Zakázka: {order_name})")
+                st.write(f"- **{qty}x** 2-step ladders  (Order: {order_name})")
 
     except Exception as e:
-        st.error(f"Chyba při zpracování souboru: {e}")
+        st.error(f"Error processing file: {e}")
