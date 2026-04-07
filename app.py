@@ -238,11 +238,11 @@ if uploaded_file:
             return res
 
         # 8. Helper: build a plotly brick-layout figure for one pallet
-        # One brick per PACK (e.g. "3x 20-step"), 3 columns LEFT/MIDDLE/RIGHT
+        # One brick per PACK; brick HEIGHT = pack count (so 5x is 5x taller than 1x)
         def pallet_figure(p, pack_getter):
-            BLOCK_H = 1.0
+            UNIT_H  = 1.0       # height per ladder
             BLOCK_W = 0.85
-            GAP     = 0.08
+            GAP     = 0.15      # gap between bricks (in ladder-units)
 
             stack_labels = ["LEFT", "MIDDLE", "RIGHT"]
             stack_packs  = [pack_getter(p["L"]), pack_getter(p["M"]), pack_getter(p["R"])]
@@ -253,17 +253,20 @@ if uploaded_file:
             legend_seen = set()
             legend_traces = []
 
-            max_packs_in_stack = max((len(s) for s in stack_packs), default=1)
+            max_total_height = 0
 
             for x_center, packs in zip(x_centers, stack_packs):
                 x0 = x_center - BLOCK_W / 2
                 x1 = x_center + BLOCK_W / 2
 
-                for row_idx, pack in enumerate(packs):  # bottom → top
-                    y0 = row_idx * (BLOCK_H + GAP)
-                    y1 = y0 + BLOCK_H
-                    color = step_color(pack["Steps"])
+                y_cursor = 0.0
+                for pack in packs:  # bottom → top
+                    h = pack["Count"] * UNIT_H
+                    y0 = y_cursor
+                    y1 = y0 + h
+                    y_cursor = y1 + GAP
 
+                    color = step_color(pack["Steps"])
                     shapes.append(dict(
                         type="rect",
                         x0=x0, x1=x1, y0=y0, y1=y1,
@@ -275,7 +278,7 @@ if uploaded_file:
                         x=x_center, y=(y0 + y1) / 2,
                         text=f"<b>{pack['Count']}x {pack['Steps']}-step</b>",
                         showarrow=False,
-                        font=dict(color="white", size=18, family="Arial"),
+                        font=dict(color="white", size=16, family="Arial"),
                         xanchor="center", yanchor="middle",
                     ))
 
@@ -289,7 +292,12 @@ if uploaded_file:
                             showlegend=True,
                         ))
 
-            fig_height = max(320, int(max_packs_in_stack * (BLOCK_H + GAP) * 60 + 100))
+                max_total_height = max(max_total_height, y_cursor)
+
+            if max_total_height == 0:
+                max_total_height = 1
+
+            fig_height = max(360, int(max_total_height * 28 + 120))
 
             fig = go.Figure(data=sorted(legend_traces, key=lambda t: int(t.name.split("-")[0])))
             fig.update_layout(
@@ -307,7 +315,7 @@ if uploaded_file:
                 yaxis=dict(
                     showgrid=False, zeroline=False,
                     showticklabels=False,
-                    range=[-0.3, max(max_packs_in_stack, 1) * (BLOCK_H + GAP) + 0.3],
+                    range=[-0.5, max_total_height + 0.5],
                 ),
                 legend=dict(
                     title="Step type", orientation="h",
