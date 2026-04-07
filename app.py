@@ -144,29 +144,83 @@ if uploaded_file:
 
         for order_name in ordered_order_names:
             pack_list = orders_dict[order_name]
+            # Longest ladders (biggest step count) on the bottom
             pack_list.sort(key=lambda x: (x["Steps"], x["Size"]), reverse=True)
-            current_left, current_mid, current_right = [], [], []
 
-            for pack in pack_list:
-                stacks = [("L", current_left), ("R", current_right), ("M", current_mid)]
-                stacks.sort(key=lambda x: (len(x[1]), x[0] == "M"))
+            state = {"L": [], "M": [], "R": []}
 
-                placed = False
-                for name, stack in stacks:
-                    if len(stack) + pack["Size"] <= max_per_stack:
+            def try_place(pack):
+                size = pack["Size"]
+                item = {"Order": pack["Order"], "Steps": pack["Steps"]}
+
+                candidates = []
+                if len(state["L"]) + size <= max_per_stack:
+                    candidates.append(("L", len(state["L"])))
+                if len(state["R"]) + size <= max_per_stack:
+                    candidates.append(("R", len(state["R"])))
+                # Middle may grow only while it stays ≤ shorter side after placement
+                min_side = min(len(state["L"]), len(state["R"]))
+                if (len(state["M"]) + size <= min_side
+                        and len(state["M"]) + size <= max_per_stack):
+                    candidates.append(("M", len(state["M"])))
+
+                if not candidates:
+                    return False
+
+                # Place in the shortest candidate; sides preferred over middle on ties
+                candidates.sort(key=lambda c: (c[1], c[0] == "M"))
+                target_name = candidates[0][0]
+                for _ in range(size):
+                    state[target_name].append(item)
+                return True
+
+            def close_pallet():
+                # Equalize L and R; push excess into M when it still fits,
+                # otherwise return as carry-over for the next pallet.
+                excess = []
+                while len(state["L"]) != len(state["R"]):
+                    if len(state["L"]) > len(state["R"]):
+                        item = state["L"].pop()
+                    else:
+                        item = state["R"].pop()
+                    new_min = min(len(state["L"]), len(state["R"]))
+                    if len(state["M"]) < new_min and len(state["M"]) < max_per_stack:
+                        state["M"].append(item)
+                    else:
+                        excess.append(item)
+
+                if state["L"] or state["M"] or state["R"]:
+                    pallets.append({
+                        "L": state["L"], "M": state["M"], "R": state["R"],
+                        "Order": order_name,
+                    })
+                state["L"], state["M"], state["R"] = [], [], []
+                return excess
+
+            pending = list(pack_list)
+            while pending:
+                pack = pending.pop(0)
+                if not try_place(pack):
+                    carry = close_pallet()
+                    # Re-queue carry-over as size-1 packs at the front
+                    for it in carry:
+                        pending.insert(0, {"Order": it["Order"], "Steps": it["Steps"], "Size": 1})
+                    if not try_place(pack):
+                        # Pack too large for empty pallet (size > max) — split
                         for _ in range(pack["Size"]):
-                            stack.append({"Order": pack["Order"], "Steps": pack["Steps"]})
-                        placed = True
-                        break
+                            try_place({"Order": pack["Order"], "Steps": pack["Steps"], "Size": 1})
 
-                if not placed:
-                    pallets.append({"L": current_left, "M": current_mid, "R": current_right, "Order": order_name})
-                    current_left, current_mid, current_right = [], [], []
-                    for _ in range(pack["Size"]):
-                        current_left.append({"Order": pack["Order"], "Steps": pack["Steps"]})
-
-            if current_left or current_mid or current_right:
-                pallets.append({"L": current_left, "M": current_mid, "R": current_right, "Order": order_name})
+            # Final flush — may take multiple passes if carry-over keeps appearing
+            safety = 0
+            while True:
+                carry = close_pallet()
+                if not carry:
+                    break
+                for it in carry:
+                    try_place({"Order": it["Order"], "Steps": it["Steps"], "Size": 1})
+                safety += 1
+                if safety > 20:
+                    break
 
         # 7. Helper: group a raw stack list into packs
         def get_packs(stack):
